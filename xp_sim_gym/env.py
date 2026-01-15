@@ -4,6 +4,10 @@ import numpy as np
 import math
 import time
 from .utils import GeoUtils
+from .constants import (
+    MAX_DEVIATION_SEGMENTS, MAX_XTRACK_ERROR_NM, DT_DECISION,
+    MAX_ALT, MAX_SPD, MAX_FUEL, MAX_WIND, MAX_DIST
+)
 
 class XPlaneDevEnv(gym.Env):
     """
@@ -49,18 +53,6 @@ class XPlaneDevEnv(gym.Env):
         self.lookahead_count = lookahead_count
         self.nominal_route = nominal_route if nominal_route else []
         self.current_waypoint_idx = 0
-        
-        # Constantes
-        self.DT_DECISION = 300
-        self.MAX_DEVIATION_SEGMENTS = 20
-        self.MAX_XTRACK_ERROR_NM = 50.0
-        
-        # Valeurs max pour normalisation
-        self.MAX_ALT = 45000.0
-        self.MAX_SPD = 600.0 
-        self.MAX_FUEL = 20000.0 
-        self.MAX_WIND = 200.0 
-        self.MAX_DIST = 1000.0 
         
         obs_dim = 6 + 4 + (4 * self.lookahead_count)
         
@@ -117,10 +109,10 @@ class XPlaneDevEnv(gym.Env):
         terminated = False
         truncated = False
         
-        if self.steps_taken >= self.MAX_DEVIATION_SEGMENTS:
+        if self.steps_taken >= MAX_DEVIATION_SEGMENTS:
             truncated = True
         
-        if abs(xte_nm) > self.MAX_XTRACK_ERROR_NM:
+        if abs(xte_nm) > MAX_XTRACK_ERROR_NM:
             reward -= 100.0
             terminated = True
             
@@ -161,12 +153,12 @@ class XPlaneDevEnv(gym.Env):
         self.wind_v = -w_spd_kt * math.cos(w_rad)
 
     def _get_observation(self):
-        norm_alt = self.alt_m / (self.MAX_ALT * 0.3048) # m to ft conversion if necessary, or standardize
-        norm_tas = self.tas_ms / (self.MAX_SPD * 0.514444)
-        norm_gs  = self.gs_ms / (self.MAX_SPD * 0.514444)
-        norm_fuel= self.current_fuel_kg / self.MAX_FUEL
-        norm_wu = self.wind_u / (self.MAX_WIND * 0.514444)
-        norm_wv = self.wind_v / (self.MAX_WIND * 0.514444)
+        norm_alt = self.alt_m / (MAX_ALT * 0.3048) # m to ft conversion if necessary, or standardize
+        norm_tas = self.tas_ms / (MAX_SPD * 0.514444)
+        norm_gs  = self.gs_ms / (MAX_SPD * 0.514444)
+        norm_fuel= self.current_fuel_kg / MAX_FUEL
+        norm_wu = self.wind_u / (MAX_WIND * 0.514444)
+        norm_wv = self.wind_v / (MAX_WIND * 0.514444)
         
         state_obs = np.array([norm_alt, norm_tas, norm_gs, norm_fuel, norm_wu, norm_wv], dtype=np.float32)
         
@@ -199,10 +191,10 @@ class XPlaneDevEnv(gym.Env):
             dist_to_dest = 0.0
 
         route_obs = np.array([
-            xte / self.MAX_XTRACK_ERROR_NM,
-            dist_to_wpt / self.MAX_DIST,
+            xte / MAX_XTRACK_ERROR_NM,
+            dist_to_wpt / MAX_DIST,
             brg_err / 180.0,
-            dist_to_dest / (self.MAX_DIST * 2)
+            dist_to_dest / (MAX_DIST * 2)
         ], dtype=np.float32)
         
         lookahead_obs = []
@@ -230,10 +222,10 @@ class XPlaneDevEnv(gym.Env):
                 cross = w_u * math.cos(leg_rad) - w_v * math.sin(leg_rad)
                 
                 lookahead_obs.extend([
-                    d / self.MAX_DIST,
+                    d / MAX_DIST,
                     rel_b / 180.0,
-                    along / (self.MAX_WIND * 0.5144), # Normalize wind components
-                    cross / (self.MAX_WIND * 0.5144)
+                    along / (MAX_WIND * 0.5144), # Normalize wind components
+                    cross / (MAX_WIND * 0.5144)
                 ])
             else:
                 # If no more waypoints, pad with default values (e.g., 1.0 for distance, 0.0 for others)

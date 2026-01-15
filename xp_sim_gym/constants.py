@@ -1,0 +1,12 @@
+
+# Normalization constants
+MAX_ALT = 45000.0
+MAX_SPD = 600.0
+MAX_FUEL = 20000.0
+MAX_WIND = 200.0
+MAX_DIST = 1000.0
+
+# Environment constants
+MAX_DEVIATION_SEGMENTS = 20
+MAX_XTRACK_ERROR_NM = 50.0
+DT_DECISION = 300

@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "gymnasium>=1.2.3",
+    "openap>=2.4",
+    "stable-baselines3>=2.7.1",
 ]
 
 [tool.setuptools.packages.find]
