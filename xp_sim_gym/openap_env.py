@@ -190,31 +190,9 @@ class OpenAPNavEnv(gym.Env):
         # 4. Check Waypoint/Segment Logic
         self._check_waypoint_progression()
 
-        # 5. Reward Calculation
-        # a. Progress Reward: reward for reducing distance to waypoint
-        target_wp = self.nominal_route[min(
-            self.current_waypoint_idx, len(self.nominal_route)-1)]
-        dist_to_wpt_now = GeoUtils.haversine_dist(
-            self.lat, self.lon, target_wp['lat'], target_wp['lon'])
-
-        # We need the previous distance to calculate progress.
-        # Using a simplified progress reward based on track error and distance.
-        reward = 0.0
-
-        # b. Fuel Penalty (Scale: 1 kg -> -0.001)
-        reward -= (fuel_consumed / 1000.0)
-
-        # c. Time Penalty (Prevent suicide, but encourage efficiency)
-        reward -= 0.005 * duration_min
-
-        # d. XTE Penalty (Scale: 1 NM -> -1.0)
+        # 5. Reward Calculation and Status
         xte_nm = self._calculate_xte()
-        reward -= 1.0 * abs(xte_nm)
-
-        # e. Progress incentive: encourage staying on track and moving forward
-        # If XTE is small, give a bonus proportional to the error (smaller == larger reward)
-        if abs(xte_nm) < 1.0:
-            reward += 0.1 * (1.0 - abs(xte_nm))
+        reward = self._compute_reward(fuel_consumed, duration_min, xte_nm)
 
         terminated = False
         truncated = False
@@ -223,16 +201,50 @@ class OpenAPNavEnv(gym.Env):
             truncated = True
 
         if abs(xte_nm) > MAX_XTRACK_ERROR_NM:
-            # Crash penalty must be > accumulated step penalties
-            # Current step penalty ~ -2 to -3. max steps ~10-20.
-            # Max accumulated ~ -40 to -60.
-            # Crash = -100 is sufficient.
-            reward -= 100.0
             terminated = True
 
         self.steps_taken += 1
 
         return self._get_observation(), reward, terminated, truncated, {}
+
+    def _compute_reward(self, fuel_consumed, duration_min, xte_nm):
+        """
+        Calcule la récompense (reward) pour l'étape actuelle.
+        
+        Args:
+            fuel_consumed (float): Carburant consommé pendant l'étape (kg).
+            duration_min (float): Durée de l'étape (minutes).
+            xte_nm (float): Erreur latérale / Cross-track error (NM).
+            
+        Returns:
+            float: La récompense calculée.
+        ""
+        """
+        # a. Récompense de progression : réduction de la distance vers le point de passage
+        # (Logique de progression future)
+        # target_wp = self.nominal_route[min(self.current_waypoint_idx, len(self.nominal_route)-1)]
+        # dist_to_wpt_now = GeoUtils.haversine_dist(self.lat, self.lon, target_wp['lat'], target_wp['lon'])
+
+        reward = 0.0
+
+        # b. Pénalité de carburant (Échelle : 1 kg -> -0.001)
+        reward -= (fuel_consumed / 1000.0)
+
+        # c. Pénalité de temps (encourage l'efficacité)
+        reward -= 0.005 * duration_min
+
+        # d. Pénalité d'erreur latérale (Échelle : 1 NM -> -1.0)
+        reward -= 1.0 * abs(xte_nm)
+
+        # e. Bonus de précision : encourage le modèle à rester sur la trajectoire
+        if abs(xte_nm) < 1.0:
+            reward += 0.1 * (1.0 - abs(xte_nm))
+
+        # f. Pénalité de crash, si l'avion dévie beaucoup trop de la trajectoire, c'est finito
+        if abs(xte_nm) > MAX_XTRACK_ERROR_NM:
+            reward -= 100.0
+
+        return reward
 
     def _check_waypoint_progression(self):
         if self.current_waypoint_idx < len(self.nominal_route):
