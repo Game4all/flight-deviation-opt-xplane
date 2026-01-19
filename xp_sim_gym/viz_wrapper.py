@@ -196,9 +196,14 @@ class OpenAPVizWrapper(gym.Wrapper):
         pygame.draw.polygon(self.screen, (255, 255, 0), [p1, p2, p3])
         
         # 5. Informations textuelles
+        # Try to get ATE/XTE from env info if available, otherwise calculate
+        xte = self.env._calculate_xte()
+        ate = self.env._calculate_atd()
+        
         info_lines = [
             f"Cap (HDG): {int(self.env.heading_mag)}°",
-            f"Ecart Lat (XTE): {self.env._calculate_xte():.2f} NM",
+            f"Ecart Lat (XTE): {xte:.2f} NM",
+            f"Dist Parcours (ATE): {ate:.2f} NM",
             f"Durée Totale: {self.total_duration_min:.1f} min",
             f"Durée Seg: {self.last_action_duration:.2f} min",
             f"Carburant: {int(self.env.current_fuel_kg)} kg",

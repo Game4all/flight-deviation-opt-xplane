@@ -19,21 +19,22 @@ class OpenAPNavEnv(gym.Env):
     Cet environement vise à permettre le pré-entraînement d'un agent pour optimiser les déviations de vol.
 
     **Observations:**
-    Vecteur numpy avec `6 + 4 + (4 * lookahead_count)` éléments. 
+    Vecteur numpy avec `7 + 4 + (4 * lookahead_count)` éléments = `11 + 4N`.
     *Note : Toutes les altitudes sont en **mètres**.*
 
-    1.  **État de l'Avion (6)** :
+    1.  **État de l'Avion (7)** :
         *   `norm_alt` : Altitude actuelle / MAX_ALT (45,000 ft)
         *   `norm_tas` : Vitesse Vraie (TAS) / MAX_SPD (600 kts)
         *   `norm_gs` : Vitesse Sol (GS) / MAX_SPD (600 kts)
         *   `norm_fuel` : Quantité de Carburant / MAX_FUEL (20,000 kg)
         *   `norm_wu` : Composante Vent U / MAX_WIND (200 kts)
         *   `norm_wv` : Composante Vent V / MAX_WIND (200 kts)
+        *   `applied_offset` : La dernière action de déviation demandée (normalisée [-1, 1]).
 
     2.  **Contexte de la Route (4)** :
-        *   `xte` : Erreur Latérale (Cross-Track Error) / MAX_XTE (50 NM)
+        *   `xte` : Erreur Latérale (Cross-Track Error) / MAX_XTRACK_ERROR_NM (50 NM)
         *   `dist_to_wpt` : Distance au prochain waypoint / MAX_DIST (1000 NM)
-        *   `brg_err` : Erreur de Cap vers la route / 180 degrés
+        *   `track_angle_error` : Erreur d'angle de route (Track vs Bearing) / 180 degrés.
         *   `dist_to_dest` : Distance à la destination / (2 * MAX_DIST)
 
     3.  **Anticipation (Lookahead) (4 * N)** : 
@@ -45,8 +46,11 @@ class OpenAPNavEnv(gym.Env):
 
     **Actions:**
     Un vecteur de 2 éléments normalisé entre [-1.0, 1.0] :
-    1.  `Heading Offset` : Normalisé sur [MIN_HEADING_OFFSET, MAX_HEADING_OFFSET] degrés.
-    2.  `Duration` : Normalisé sur [MIN_DURATION_MIN, MAX_DURATION_MIN] minutes.
+    1.  `Heading Offset` : Déviation par rapport au cap **autonome** (vers le prochain waypoint). 
+        *   0 => Voler directement vers le waypoint.
+        *   Normalisé sur [MIN_HEADING_OFFSET, MAX_HEADING_OFFSET] degrés.
+    2.  `Duration` : Durée de l'action de maintien de cap.
+        *   Normalisé sur [MIN_DURATION_MIN, MAX_DURATION_MIN] minutes.
     """
     metadata = {"render_modes": [], "render_fps": 1}
 
@@ -65,7 +69,8 @@ class OpenAPNavEnv(gym.Env):
         self.current_waypoint_idx = 0
         self.nominal_route = self.config.nominal_route if self.config.nominal_route else []
 
-        obs_dim = 6 + 4 + (4 * self.lookahead_count)
+        # Obs dim: 7 (State) + 4 (Route) + 4*N (Lookahead)
+        obs_dim = 7 + 4 + (4 * self.lookahead_count)
 
         self.observation_space = spaces.Box(
             low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32
@@ -75,7 +80,9 @@ class OpenAPNavEnv(gym.Env):
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(2,), dtype=np.float32
         )
-
+        
+        self.previous_offset = 0.0 # Initialize previous offset
+        
         self._setup_initial_state()
 
     def _setup_initial_state(self):
@@ -141,58 +148,82 @@ class OpenAPNavEnv(gym.Env):
             (action[1] + 1.0) * 0.5 * (MAX_DURATION_MIN - MIN_DURATION_MIN)
         duration_sec = duration_min * 60.0
 
-        # 1. Apply Action (Heading)
-        target_heading = (self.heading_mag + heading_offset_deg) % 360.0
+        # 1. Setup Simulation Loop
+        remaining_time = duration_sec
+        dt_sim = 60.0  # 1 minute sub-steps for waypoint checking
 
-        # 2. Kinematics Simulation
-        # Assume constant wind for the segment
-        # Update Ground Speed vector
-        heading_rad = math.radians(target_heading)
+        total_fuel_consumed = 0.0
 
-        # TAS vector
-        tas_n = self.tas_ms * math.cos(heading_rad)
-        tas_e = self.tas_ms * math.sin(heading_rad)
+        # Store action for observation
+        self.previous_offset = action[0] 
 
-        # Ground Speed vector
-        gs_n = tas_n + self.wind_v
-        gs_e = tas_e + self.wind_u
+        while remaining_time > 0:
+            current_dt = min(dt_sim, remaining_time)
+            
+            # a. Calculate Auto Heading (Dynamic per sub-step)
+            if self.current_waypoint_idx < len(self.nominal_route):
+                target_wp = self.nominal_route[self.current_waypoint_idx]
+                auto_heading = GeoUtils.bearing(self.lat, self.lon, target_wp['lat'], target_wp['lon'])
+            else:
+                auto_heading = self.heading_mag 
 
-        self.gs_ms = math.sqrt(gs_e**2 + gs_n**2)
-        track_rad = math.atan2(gs_e, gs_n)
-        track_deg = (math.degrees(track_rad) + 360) % 360
+            # b. Apply Action Offset to current Auto Heading
+            target_heading = (auto_heading + heading_offset_deg) % 360.0
+            
+            # c. Kinematics (for current_dt)
+            heading_rad = math.radians(target_heading)
 
-        # Distance flown in duration
-        dist_m = self.gs_ms * duration_sec
-        dist_nm = dist_m / 1852.0
+            # TAS vector
+            tas_n = self.tas_ms * math.cos(heading_rad)
+            tas_e = self.tas_ms * math.sin(heading_rad)
 
-        # Update Position
-        delta_lat = (dist_nm * math.cos(track_rad)) / 60.0
-        self.lat += delta_lat
+            # Ground Speed vector
+            gs_n = tas_n + self.wind_v
+            gs_e = tas_e + self.wind_u
 
-        delta_lon = (dist_nm * math.sin(track_rad)) / \
-            (60.0 * math.cos(math.radians(self.lat)))
-        self.lon += delta_lon
+            self.gs_ms = math.sqrt(gs_e**2 + gs_n**2)
+            track_rad = math.atan2(gs_e, gs_n)
+            
+            # Distance flown in this sub-step
+            dist_m = self.gs_ms * current_dt
+            dist_nm = dist_m / 1852.0
 
-        # Update Heading (Simulating the AP holding the heading)
-        self.heading_mag = target_heading
+            # Update Position
+            delta_lat = (dist_nm * math.cos(track_rad)) / 60.0
+            self.lat += delta_lat
 
-        # 3. Fuel Consumption Simulation (OpenAP)
-        ff_kg_s = self.fuel_flow_model.enroute(
-            mass=self.current_fuel_kg + 40000,
-            tas=self.tas_ms / 0.514444,  # to kts
-            alt=self.alt_m / 0.3048,  # to ft
-        )
+            delta_lon = (dist_nm * math.sin(track_rad)) / \
+                (60.0 * math.cos(math.radians(self.lat)))
+            self.lon += delta_lon
 
-        fuel_consumed = ff_kg_s * duration_sec
-        self.current_fuel_kg -= fuel_consumed
+            # Update Heading
+            self.heading_mag = target_heading
 
-        # 4. Check Waypoint/Segment Logic
+            # d. Fuel Consumption (for current_dt)
+            ff_kg_s = self.fuel_flow_model.enroute(
+                mass=self.current_fuel_kg + 40000,
+                tas=self.tas_ms / 0.514444,
+                alt=self.alt_m / 0.3048,
+            )
+            fuel_step = ff_kg_s * current_dt
+            self.current_fuel_kg -= fuel_step
+            total_fuel_consumed += fuel_step
+
+            # e. Check Waypoint Passing
+            self._check_waypoint_progression()
+            
+            remaining_time -= current_dt
+            
+        fuel_consumed = total_fuel_consumed
+
+        # 5. Check Waypoint/Segment Logic
         was_complete = self.current_waypoint_idx >= len(self.nominal_route)
         self._check_waypoint_progression()
         is_complete = self.current_waypoint_idx >= len(self.nominal_route)
 
-        # 5. Reward Calculation and Status
+        # 6. Reward Calculation and Status
         xte_nm = self._calculate_xte()
+        ate_nm = self._calculate_atd()
 
         # Calculate Global Progression (Reward for reducing total distance to destination)
         new_total_dist = self._get_total_remaining_dist()
@@ -212,10 +243,20 @@ class OpenAPNavEnv(gym.Env):
 
         if abs(xte_nm) > MAX_XTRACK_ERROR_NM:
             terminated = True
+            
+        if is_complete:
+            terminated = True
 
         self.steps_taken += 1
+        
+        info = {
+            "xte": xte_nm,
+            "ate": ate_nm,
+            "fuel_consumed": fuel_consumed,
+            "progression": progression_nm
+        }
 
-        return self._get_observation(), reward, terminated, truncated, {}
+        return self._get_observation(), reward, terminated, truncated, info
 
     def _compute_reward(self, fuel_consumed, duration_min, xte_nm, progression_nm, terminal_bonus):
         """
@@ -461,6 +502,10 @@ class OpenAPNavEnv(gym.Env):
         norm_fuel = self.current_fuel_kg / MAX_FUEL
         norm_wu = self.wind_u / (MAX_WIND * 0.514444)
         norm_wv = self.wind_v / (MAX_WIND * 0.514444)
+        
+        # New State Observation: Applied Offset
+        # We use the raw action value from the previous step which is already in [-1, 1]
+        norm_offset = self.previous_offset
 
         # Clip state observations to [-1, 1] or [0, 1]
         state_obs = np.array([
@@ -469,7 +514,8 @@ class OpenAPNavEnv(gym.Env):
             np.clip(norm_gs, 0.0, 1.0),
             np.clip(norm_fuel, 0.0, 1.0),
             np.clip(norm_wu, -1.0, 1.0),
-            np.clip(norm_wv, -1.0, 1.0)
+            np.clip(norm_wv, -1.0, 1.0),
+            np.clip(norm_offset, -1.0, 1.0)
         ], dtype=np.float32)
 
         # Route Obs
@@ -487,10 +533,20 @@ class OpenAPNavEnv(gym.Env):
                 self.lat, self.lon, prev_lat, prev_lon, target_lat, target_lon)
             dist_to_wpt = GeoUtils.haversine_dist(
                 self.lat, self.lon, target_lat, target_lon)
-
-            desired_track = GeoUtils.bearing(
-                self.lat, self.lon, target_lat, target_lon)
-            brg_err = (desired_track - self.heading_mag + 180) % 360 - 180
+            
+            # Replaced bearing error with Track Angle Error
+            # Nominal leg bearing
+            leg_bearing = GeoUtils.bearing(prev_lat, prev_lon, target_lat, target_lon)
+            
+            # Actual Track
+            # We need the track from the previous step which was calculated in step()
+            # But here in get_observation we might need to recalculate or store it.
+            # Ideally we recalculate current track based on velocity vector
+            gs_n = self.tas_ms * math.cos(math.radians(self.heading_mag)) + self.wind_v
+            gs_e = self.tas_ms * math.sin(math.radians(self.heading_mag)) + self.wind_u
+            current_track = (math.degrees(math.atan2(gs_e, gs_n)) + 360) % 360
+            
+            track_err = (current_track - leg_bearing + 180) % 360 - 180
 
             last_wp = self.nominal_route[-1]
             dist_to_dest = GeoUtils.haversine_dist(
@@ -499,13 +555,13 @@ class OpenAPNavEnv(gym.Env):
         else:
             xte = 0.0
             dist_to_wpt = 0.0
-            brg_err = 0.0
+            track_err = 0.0
             dist_to_dest = 0.0
 
         route_obs = np.array([
             xte / MAX_XTRACK_ERROR_NM,
             dist_to_wpt / MAX_DIST,
-            brg_err / 180.0,
+            track_err / 180.0,
             dist_to_dest / (MAX_DIST * 2)
         ], dtype=np.float32)
 
