@@ -149,39 +149,51 @@ class OpenAPVizWrapper(gym.Wrapper):
             traj_points.append(self._to_pixel(self.env.lat, self.env.lon))
             pygame.draw.lines(self.screen, (255, 165, 0), False, traj_points, 1)
 
-        # 3. Dessin du vecteur de vent
-        # Using arrows pointing in the direction the wind comes from (as requested)
-        # In aviation, wind direction is where it comes from.
-        # env.wind_u (East), env.wind_v (North) are flow components (where it goes)
-        # Wind direction (from) = (atan2(-u, -v) + 360) % 360
-        u, v = self.env.wind_u, self.env.wind_v
-        if abs(u) > 0.1 or abs(v) > 0.1:
-            # Draw wind arrow in top right corner
-            arrow_pos = (self.width - 60, 60)
-            pygame.draw.circle(self.screen, (200, 200, 200), arrow_pos, 30, 1)
+        # 3. Dessin du champ de vent (Wind Field)
+        # Visualise les flux de vent sur une grille
+        if hasattr(self.env, 'wind_streams'):
+            grid_step_lat = (self.lat_max - self.lat_min) / 10.0 # ~10x10 grid (Reduced from 15x15)
+            grid_step_lon = (self.lon_max - self.lon_min) / 10.0
             
-            spd_kts = math.sqrt(u**2 + v**2) / 0.514444
-            
-            # Direction vector (from)
-            from_u, from_v = -u, -v
-            mag = math.sqrt(from_u**2 + from_v**2)
-            if mag > 0:
-                dx = (from_u / mag) * 25
-                dy = -(from_v / mag) * 25 # Flip V for screen Y
-                
-                start_p = (arrow_pos[0] + dx, arrow_pos[1] + dy)
-                end_p = (arrow_pos[0], arrow_pos[1])
-                
-                pygame.draw.line(self.screen, (0, 191, 255), start_p, end_p, 3)
-                # Arrow head
-                angle = math.atan2(dy, dx)
-                pygame.draw.line(self.screen, (0, 191, 255), end_p, 
-                                 (end_p[0] + math.cos(angle + 0.5) * 10, end_p[1] + math.sin(angle + 0.5) * 10), 2)
-                pygame.draw.line(self.screen, (0, 191, 255), end_p, 
-                                 (end_p[0] + math.cos(angle - 0.5) * 10, end_p[1] + math.sin(angle - 0.5) * 10), 2)
-            
-            wind_text = self.font.render(f"Vent: {int(spd_kts)} kts", True, (255, 255, 255))
-            self.screen.blit(wind_text, (self.width - 110, 100))
+            for lat in np.arange(self.lat_min, self.lat_max, grid_step_lat):
+                for lon in np.arange(self.lon_min, self.lon_max, grid_step_lon):
+                    u, v = self.env._sample_wind_at(lat, lon, self.env.alt_m)
+                    
+                    if abs(u) > 1.0 or abs(v) > 1.0: # Ignore very light wind
+                        px, py = self._to_pixel(lat, lon)
+                        
+                        # Calculate mag and direction
+                        spd_ms = math.sqrt(u**2 + v**2)
+                        spd_kts = spd_ms / 0.514444
+                        
+                        # Arrow length proportional to speed, clamped
+                        # Scaled up for "bigger arrows" (Max 40px)
+                        arrow_len = min(40, max(10, spd_kts / 2.0)) 
+                        
+                        # Direction (Where wind goes TO)
+                        # Pygame Y is down, so if V (North) is positive, it goes UP (-Y)
+                        dx = u / spd_ms * arrow_len
+                        dy = -v / spd_ms * arrow_len
+                        
+                        start_p = (px, py)
+                        end_p = (px + dx, py + dy)
+                        
+                        # Color gradient based on speed
+                        # Blue (calm) -> Red (Strong)
+                        intensity = min(1.0, spd_kts / 100.0)
+                        r = int(255 * intensity)
+                        g = int(200 * (1 - intensity))
+                        b = int(255 * (1 - intensity)) + 50
+                        
+                        color = (
+                            min(255, max(0, r)), 
+                            min(255, max(0, g)), 
+                            min(255, max(0, b))
+                        )
+                        
+                        pygame.draw.line(self.screen, color, start_p, end_p, 3) # Thickness 3
+                        # Medium dot at origin
+                        pygame.draw.circle(self.screen, color, start_p, 3)
 
         # 4. Dessin de l'avion
         plane_px = self._to_pixel(self.env.lat, self.env.lon)

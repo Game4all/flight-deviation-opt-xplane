@@ -1,6 +1,14 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+@dataclass
+class WindStreamConfig:
+    lat: float
+    lon: float
+    direction: float  # bearing in degrees
+    width_nm: float   # Width standard deviation in NM
+    max_speed_kts: float
+
 
 @dataclass
 class PlaneEnvironmentConfig:
@@ -19,6 +27,7 @@ class PlaneEnvironmentConfig:
     initial_heading_mag: Optional[float] = None
 
     # Wind Config
-    wind_u: Optional[float] = None  # Flow component East
-    wind_v: Optional[float] = None  # Flow component North
+    # Wind Config - Jet Stream / River Model
+    # List of wind streams. If empty and randomize_wind is True, streams will be generated based on stage.
+    wind_streams: List[WindStreamConfig] = field(default_factory=list)
     randomize_wind: bool = True

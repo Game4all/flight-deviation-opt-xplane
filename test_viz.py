@@ -8,39 +8,32 @@ from xp_sim_gym.config import PlaneEnvironmentConfig
 
 from stable_baselines3 import PPO
 
-def generate_long_route(lat_0, lon_0, num_segments=20):
-    route = [{'lat': lat_0, 'lon': lon_0, 'alt': 10000}]
-    curr_lat, curr_lon = lat_0, lon_0
-    curr_bng = 45 # Northeast
-    
-    for _ in range(num_segments):
-        dist_nm = np.random.uniform(40, 70)
-        turn = np.random.uniform(-30, 30)
-        curr_bng = (curr_bng + turn) % 360
-        
-        d_lat = dist_nm / 60.0 * math.cos(math.radians(curr_bng))
-        d_lon = dist_nm / 60.0 * math.sin(math.radians(curr_bng)) / math.cos(math.radians(curr_lat))
-        
-        curr_lat += d_lat
-        curr_lon += d_lon
-        route.append({'lat': curr_lat, 'lon': curr_lon, 'alt': 10000})
-    return route
+from xp_sim_gym.route_generator import RouteStageGenerator
 
 def main():
-    # 1. Setup config (Stage 3 for strong wind)
+    # 1. Setup config (Stage 5 for complex route + wind)
     lat_start, lon_start = 48.8566, 2.3522
-    long_route = generate_long_route(lat_start, lon_start, num_segments=15)
-
-    config = PlaneEnvironmentConfig(
+    
+    base_config = PlaneEnvironmentConfig(
         aircraft_type="A320",
         initial_lat=lat_start,
         initial_lon=lon_start,
-        nominal_route=long_route,
+    )
+    generator = RouteStageGenerator(base_config)
+    route, wind_streams = generator.generate(stage=5)
+
+    config = PlaneEnvironmentConfig(
+        aircraft_type="A320",
+        initial_lat=route[0]['lat'],
+        initial_lon=route[0]['lon'],
+        nominal_route=route,
+        wind_streams=wind_streams,
+        randomize_wind=False
     )
     
     # 2. Create env and wrap it
     env = OpenAPNavEnv(config)
-    env.set_pretraining_stage(3)
+    env.set_pretraining_stage(5)
     env = OpenAPVizWrapper(env)
     
     # 3. Load Model
@@ -53,7 +46,7 @@ def main():
         print(f"Could not load model: {e}. Falling back to random actions.")
         use_model = False
 
-    print(f"Starting simulation test with {len(long_route)} waypoints...")
+    print(f"Starting simulation test with {len(route)} waypoints...")
     obs, info = env.reset()
     
     done = False
@@ -64,6 +57,7 @@ def main():
             # 4. Get action from model or random
             if use_model:
                 action, _states = model.predict(obs, deterministic=True)
+                print(action)
             else:
                 action = env.action_space.sample()
             

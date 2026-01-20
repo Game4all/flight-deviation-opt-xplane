@@ -17,9 +17,12 @@ class CurriculumCallback(BaseCallback):
         super(CurriculumCallback, self).__init__(verbose)
         self.stage = 1
         # Define stage transitions (timestep thresholds)
+        # 1M steps total, ~200k per stage
         self.thresholds = {
-            1: 100_000,   # Switch to Stage 2 after 50k steps
-            2: 200_000,  # Switch to Stage 3 after 150k steps (Total)
+            1: 200_000,
+            2: 400_000,
+            3: 600_000,
+            4: 800_000,
         }
 
     def _on_step(self) -> bool:
@@ -78,9 +81,9 @@ def main():
     curr_callback = CurriculumCallback(verbose=1)
 
     # Train
-    print("Starting Pretraining with Curriculum...")
-    total_timesteps = 300_000
-    model.learn(total_timesteps=total_timesteps, callback=curr_callback)
+    print("Starting Pretraining with 5-Stage Curriculum...")
+    total_timesteps = 2_000_000
+    model.learn(total_timesteps=total_timesteps, callback=curr_callback, progress_bar=True)
 
     # Save Model
     save_path = "ppo_flight_deviation_pretrained"
