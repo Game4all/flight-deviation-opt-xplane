@@ -58,12 +58,13 @@ class OpenAPNavEnv(gym.Env):
     """
     metadata = {"render_modes": [], "render_fps": 1}
 
-    def __init__(self, config: PlaneEnvironmentConfig):
+    def __init__(self, config: PlaneEnvironmentConfig, verbose: bool = False):
         super().__init__()
 
         assert config is not None, "Config should not be none"
 
         self.config = config
+        self.verbose = verbose
 
         self.aircraft_type = self.config.aircraft_type
         self.fuel_flow_model = FuelFlow(ac=self.aircraft_type)
@@ -145,11 +146,13 @@ class OpenAPNavEnv(gym.Env):
     def set_pretraining_stage(self, stage):
         """Règle le niveau de difficulté de l'environnement pour le pré-entraînement"""
         if stage not in [1, 2, 3, 4, 5, 6]:
-            print(f"Warning: Etape {stage} invalide.")
+            if self.verbose:
+                print(f"Warning: Etape {stage} invalide.")
             return
 
         self.stage = stage
-        print(f"OpenAPNavEnv switched to Stage {stage}")
+        if self.verbose:
+            print(f"OpenAPNavEnv switched to Stage {stage}")
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
