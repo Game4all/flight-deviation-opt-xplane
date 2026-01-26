@@ -17,6 +17,8 @@ MAX_HEADING_OFFSET = 15.0
 MIN_DURATION_MIN = 5.0
 MAX_DURATION_MIN = 30.0
 
+# Standard rate turn numbers of degrees per second
+STD_RATE_TURN_DEG_PER_SEC = 3 
 
 # Conversion constants
 

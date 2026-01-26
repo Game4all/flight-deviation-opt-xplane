@@ -4,6 +4,8 @@ import pygame
 import math
 import time
 
+from xp_sim_gym.constants import KTS_TO_M_S
+
 
 class OpenAPVizWrapper(gym.Wrapper):
     """
@@ -172,7 +174,7 @@ class OpenAPVizWrapper(gym.Wrapper):
 
                         # Calculate mag and direction
                         spd_ms = math.sqrt(u**2 + v**2)
-                        spd_kts = spd_ms / 0.514444
+                        spd_kts = spd_ms / KTS_TO_M_S
 
                         # Arrow length proportional to speed, clamped
                         # Scaled up for "bigger arrows" (Max 40px)
@@ -231,8 +233,8 @@ class OpenAPVizWrapper(gym.Wrapper):
             f"Durée Totale: {self.total_duration_min:.1f} min",
             f"Durée Seg: {self.last_action_duration:.2f} min",
             f"Carburant: {int(self.env.current_fuel_kg)} kg",
-            f"Vitesse TAS: {int(self.env.tas_ms / 0.514444)} kts",
-            f"Vitesse GS: {int(self.env.gs_ms / 0.514444)} kts",
+            f"Vitesse TAS: {int(self.env.tas_ms / KTS_TO_M_S)} kts",
+            f"Vitesse GS: {int(self.env.gs_ms / KTS_TO_M_S)} kts",
             # f"Niveau (Stage): {self.env.stage}"
         ]
 

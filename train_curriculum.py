@@ -26,6 +26,10 @@ class CurriculumTrainingConfig(BaseModel):
     thresholds: dict[int, float] = Field(
         description="Un dict (stage -> seuil relatif, 0-1) pour configurer la durée de chaque phase du curriculum"
     )
+    keep_env_config_prob: float = Field(
+        default=0.1,
+        description="Probabilité (0.0 à 1.0) de garder la même route et le même vent lors d'un reset."
+    )
 
     @staticmethod
     def default_config():
@@ -39,7 +43,8 @@ class CurriculumTrainingConfig(BaseModel):
                 4: 0.8,
             },
             base_stage=1,
-            aircraft_type="A320"
+            aircraft_type="A320",
+            keep_env_config_prob=0.0
         )
 
 
@@ -81,7 +86,7 @@ class CurriculumTrainingCallback(BaseCallback):
                     self.training_env.set_pretraining_stage(self.stage)
 
         # logger la phase du curriculum d'entraînement pour aider a debug
-        self.logger.record("env/curriculum_stage", self.stage)
+        self.logger.record("curriculum/current_stage", self.stage)
 
         return True
 
@@ -126,8 +131,13 @@ def main():
     # Setup de l'environement
     plane_config = PlaneConfig(aircraft_type=curriculum_config.aircraft_type)
     env_config = EnvironmentConfig()
-    env = CurriculumPretrainingEnv(OpenAPNavEnv(
-        plane_config, env_config), plane_config)
+    env = CurriculumPretrainingEnv(
+        OpenAPNavEnv(plane_config, env_config),
+        plane_config,
+        prob_keep_config=curriculum_config.keep_env_config_prob,
+        max_reuse_count=2,
+        reuse_stages=[4, 5, 6]
+    )
 
     # Initialization du modèle de PPO
     model = PPO(

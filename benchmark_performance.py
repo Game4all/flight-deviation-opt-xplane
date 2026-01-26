@@ -11,7 +11,7 @@ from rich.table import Table
 from tqdm.rich import tqdm
 from stable_baselines3 import PPO
 from xp_sim_gym.openap_env import OpenAPNavEnv
-from xp_sim_gym.config import PlaneEnvironmentConfig
+from xp_sim_gym.config import EnvironmentConfig, PlaneConfig
 from xp_sim_gym.route_generator import RouteStageGenerator
 
 
@@ -27,6 +27,7 @@ def run_simulation(env, model=None):
     total_progression = 0.0
     total_distance = 0.0
     steps = 0
+    gs_ms = 0
 
     while not done:
         if model is not None:
@@ -43,6 +44,7 @@ def run_simulation(env, model=None):
         total_time += info.get("duration", 5.0)
         total_distance += info.get("distance_flown", 0.0)
         total_progression += info.get("progression", 0.0)
+        gs_ms += info.get("gs_ms", 0.0)
         max_xte = max(max_xte, abs(info.get("xte", 0.0)))
 
         steps += 1
@@ -58,7 +60,7 @@ def run_simulation(env, model=None):
         "max_xte": max_xte,
         "progression": total_progression,
         "steps": steps,
-        "success": success
+        "success": success,
     }
 
 
@@ -88,24 +90,25 @@ def aggregate_relative_diff_stats(rel_diffs):
     return {
         k: {
             "avg": np.mean(v),
-            "min": -np.max(v),
-            "max": -np.min(v), # la valeur la plus petite = le plus gros gain car c'est un ratio par rapport à la baseline
+            "min": np.min(v),
+            "max": np.max(v),
         }
         for k, v in rel_diffs.items()
     }
 
 
 def main():
-    N_RUNS = 2000
+    N_RUNS = 1000
     STAGE = 5
 
     keys = ["fuel", "distance", "time", "fuel_per_nm"]
 
-    base_config = PlaneEnvironmentConfig(
+    plane_config = PlaneConfig(
         aircraft_type="A320",
         initial_lat=48.8566,
         initial_lon=2.3522,
     )
+    env_config = EnvironmentConfig()
 
     model_path = "ppo_flight_deviation_pretrained.zip"
     try:
@@ -119,27 +122,20 @@ def main():
     model_results = []
 
     for i in tqdm(range(N_RUNS), desc="Running benchmarks"):
-        generator = RouteStageGenerator(base_config)
+        generator = RouteStageGenerator(plane_config)
         route, wind_streams = generator.generate(stage=STAGE)
 
-        benchmark_config = PlaneEnvironmentConfig(
-            aircraft_type="A320",
-            initial_lat=route[0]["lat"],
-            initial_lon=route[0]["lon"],
-            nominal_route=route,
-            wind_streams=wind_streams,
-            randomize_wind=False,
-            max_steps=100
-        )
-
         # Baseline (AP)
-        env_baseline = OpenAPNavEnv(benchmark_config)
-        env_baseline.set_pretraining_stage(6)
+        env_baseline = OpenAPNavEnv(plane_config, env_config)
+        env_baseline.set_nominal_route(route)
+        env_baseline.set_wind_config(wind_streams)
+
         baseline_stats = run_simulation(env_baseline)
 
         # PPO model
-        env_model = OpenAPNavEnv(benchmark_config)
-        env_model.set_pretraining_stage(6)
+        env_model = OpenAPNavEnv(plane_config, env_config)
+        env_model.set_nominal_route(route)
+        env_model.set_wind_config(wind_streams)
         model_stats = run_simulation(env_model, model=model)
 
         baseline_results.append(baseline_stats)
@@ -189,7 +185,7 @@ def main():
             k,
             f"{baseline_mean[k]:.4f}",
             f"{model_mean[k]:.4f}",
-            pct(-rel_mean[k]),
+            pct(rel_mean[k]),
             # pct(rel_stats[k]["avg"]),
             pct(rel_stats[k]["min"]),
             pct(rel_stats[k]["max"]),
