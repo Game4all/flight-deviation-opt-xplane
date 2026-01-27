@@ -27,7 +27,6 @@ def run_simulation(env, model=None):
     total_progression = 0.0
     total_distance = 0.0
     steps = 0
-    gs_ms = 0
 
     while not done:
         if model is not None:
@@ -44,7 +43,6 @@ def run_simulation(env, model=None):
         total_time += info.get("duration", 5.0)
         total_distance += info.get("distance_flown", 0.0)
         total_progression += info.get("progression", 0.0)
-        gs_ms += info.get("gs_ms", 0.0)
         max_xte = max(max_xte, abs(info.get("xte", 0.0)))
 
         steps += 1
@@ -68,7 +66,9 @@ def run_simulation(env, model=None):
 
 def aggregate_stats(stats_list):
     keys = ["fuel", "distance", "time", "fuel_per_nm"]
-    return {k: np.mean([s[k] for s in stats_list]) for k in keys}
+    means = {k: np.mean([s[k] for s in stats_list]) for k in keys}
+
+    return means
 
 
 def relative_diff(model_value, baseline_value):
@@ -90,15 +90,15 @@ def aggregate_relative_diff_stats(rel_diffs):
     return {
         k: {
             "avg": np.mean(v),
-            "min": np.min(v),
-            "max": np.max(v),
+            "min": np.max(v),
+            "max": np.min(v),
         }
         for k, v in rel_diffs.items()
     }
 
 
 def main():
-    N_RUNS = 1000
+    N_RUNS = 2000
     STAGE = 5
 
     keys = ["fuel", "distance", "time", "fuel_per_nm"]
@@ -170,11 +170,11 @@ def main():
     )
 
     table.add_column("Metric", justify="left", no_wrap=True)
-    table.add_column("Baseline Mean", justify="right")
-    table.add_column("Model Mean", justify="right")
-    table.add_column("Gain Rel Moyen Δ", justify="right")
-    table.add_column("Min Gain Rel Δ", justify="right")
-    table.add_column("Max Gain Rel Δ", justify="right")
+    table.add_column("Moyenne AP (FMS)", justify="right")
+    table.add_column("Moyenne Modèle PPO", justify="right")
+    table.add_column("Δ Gain Rel Moyen", justify="right")
+    table.add_column("Δ Gain Rel Minimum", justify="right")
+    table.add_column("Δ Gain Rel Maximum", justify="right")
 
     def pct(val: float) -> str:
         color = "green" if val >= 0 else "red"
@@ -185,10 +185,9 @@ def main():
             k,
             f"{baseline_mean[k]:.4f}",
             f"{model_mean[k]:.4f}",
-            pct(rel_mean[k]),
-            # pct(rel_stats[k]["avg"]),
-            pct(rel_stats[k]["min"]),
-            pct(rel_stats[k]["max"]),
+            pct(-rel_mean[k]),
+            pct(-rel_stats[k]["min"]),
+            pct(-rel_stats[k]["max"]),
         )
 
     console.print(table)
