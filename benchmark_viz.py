@@ -1,5 +1,5 @@
 """
-Script de benchmarking
+Script de benchmarking visuel sur une trajectoire du baseline (FMS Heading Magnétique) et du modèle (FMS + offset de trajectoire)
 """
 
 import math
@@ -12,7 +12,7 @@ from stable_baselines3 import PPO
 from xp_sim_gym.openap_env import OpenAPNavEnv
 from xp_sim_gym.viz_wrapper import MultiEnvViz
 from xp_sim_gym.config import EnvironmentConfig, PlaneConfig
-from xp_sim_gym.route_generator import RouteStageGenerator
+from xp_sim_gym.route_generator import RouteStageGenerator, BenchmarkRouteGenerator
 
 
 def main():
@@ -33,8 +33,8 @@ def main():
         aircraft_type="A320", initial_lat=lat_start, initial_lon=lon_start)
     env_config = EnvironmentConfig()
 
-    generator = RouteStageGenerator(plane_config_ap, args.seed)
-    route, wind_streams = generator.generate(stage=args.stage)
+    generator = BenchmarkRouteGenerator(plane_config_ap, args.seed)
+    route, wind_streams = generator.generate()
 
     # 2. Create Envs
     env_ap = OpenAPNavEnv(plane_config_ap, env_config)

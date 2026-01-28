@@ -135,7 +135,7 @@ def main():
         OpenAPNavEnv(plane_config, env_config),
         plane_config,
         prob_keep_config=curriculum_config.keep_env_config_prob,
-        max_reuse_count=2,
+        max_reuse_count=3,
         reuse_stages=[4, 5, 6]
     )
 
