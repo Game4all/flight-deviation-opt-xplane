@@ -6,17 +6,17 @@ from stable_baselines3 import PPO
 
 class CriticComparisonWrapper(gym.Wrapper):
     """
-    Un wrapper autour d'un environnement qui compare les gains de temps / distance entre suivre le cap magnétique du FMS et le gains de temps / distance de la déviation que propose le modèle.
+    Un wrapper autour d'un environnement qui compare les avantages relatifs des actions proposées par le modèle PPO et par le FMS.
+    Un seuil contrôle l'usage de l'action proposée par le modèle en comparant les avantages relatifs des deux actions au seuil défini.
 
-    Q(s, a) = R(s, a) + gamma * V(s')
     """
 
-    def __init__(self, env, model: PPO, gamma: float = 0.99):
+    def __init__(self, env, model: PPO, threshold: float = 0.0, gamma: float = 0.99):
         super().__init__(env)
         self.model = model
+        self.threshold = threshold
         self.gamma = gamma
 
-        # Stats
         self.ppo_chosen_count = 0
         self.fms_chosen_count = 0
         self.total_steps = 0
@@ -32,7 +32,7 @@ class CriticComparisonWrapper(gym.Wrapper):
         fms_next_obs, fms_reward, fms_done, fms_info = self.env.evaluate_action(
             fms_action)
 
-        # 3. Get Values from Critic
+        # Evaluer la valeur des états suivants avec le modèle critique du PPO
         with torch.no_grad():
             obs_ppo_tensor = torch.as_tensor(
                 ppo_next_obs).unsqueeze(0).to(self.model.device)
@@ -46,8 +46,13 @@ class CriticComparisonWrapper(gym.Wrapper):
         q_ppo = ppo_reward + (0 if ppo_done else self.gamma * v_ppo)
         q_fms = fms_reward + (0 if fms_done else self.gamma * v_fms)
 
-        # prendre l'action avec la meilleure q-value (meilleur résultat)
-        if q_ppo >= q_fms:
+        # calculer l'avantage normalisé par rapport à la q-value du FMS
+        # norm_adv = (q_ppo - q_fms) / (abs(q_fms) + 1e-3)
+        adv = q_ppo - q_fms
+        norm_adv = adv / (abs(q_fms) + 1e-9)
+
+        # prendre l'action avec la meilleure q-value (si elle dépasse le threshold de gain relatif)
+        if norm_adv > self.threshold:
             chosen_action = ppo_action
             self.ppo_chosen_count += 1
             source = "PPO"
@@ -61,10 +66,11 @@ class CriticComparisonWrapper(gym.Wrapper):
         # on step le vrai environement
         obs, reward, terminated, truncated, info = self.env.step(chosen_action)
 
-        # Update info with comparison data
+        # maj de la metadata pour le step, notamment source de l'action, avantage moyen
         info["chosen_action_source"] = source
         info["q_ppo"] = q_ppo
         info["q_fms"] = q_fms
+        info["norm_adv"] = norm_adv
         info["v_ppo"] = v_ppo
         info["v_fms"] = v_fms
         info["ppo_reward_hyp"] = ppo_reward

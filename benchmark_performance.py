@@ -137,7 +137,7 @@ def main():
         env_model = OpenAPNavEnv(plane_config, env_config)
         env_model.set_nominal_route(route)
         env_model.set_wind_config(wind_streams)
-        env_model = CriticComparisonWrapper(env_model, model, 0.99)
+        env_model = CriticComparisonWrapper(env_model, model, 0.3, gamma=0.92)
         model_stats = run_simulation(env_model, model=model)
 
         baseline_results.append(baseline_stats)
